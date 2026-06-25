@@ -1,0 +1,1184 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NGINX Config 產生器</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/nginx.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1e222b;
+    --border: #2a2f3a;
+    --text: #e6e9ef;
+    --muted: #8b93a7;
+    --accent: #4f8cff;
+    --accent-hover: #6a9eff;
+    --danger: #e0556b;
+    --ok: #3ecf8e;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 18px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header .spacer { flex: 1; }
+  .btn {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 7px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-family: inherit;
+    transition: background .15s, border-color .15s;
+  }
+  .btn:hover { background: #272c38; border-color: #3a4150; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+  .btn-danger { color: var(--danger); }
+  .btn-danger:hover { background: rgba(224,85,107,.12); }
+  .btn-sm { padding: 4px 8px; font-size: 12px; }
+
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 340px 360px 1fr;
+    gap: 1px;
+    background: var(--border);
+    overflow: hidden;
+    min-height: 0;
+  }
+  .col {
+    background: var(--panel);
+    overflow-y: auto;
+    padding: 14px;
+    min-width: 0;
+  }
+  /* 子網域群組／網域 雙面板：預設直向堆疊，大螢幕並排 */
+  .split-wrap { display: flex; flex-direction: column; gap: 16px; }
+  .split-wrap > .panel { min-width: 0; }
+  .col h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--muted);
+    margin: 0 0 10px;
+    font-weight: 600;
+  }
+  .section { margin-bottom: 20px; }
+  .section-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .section-title span { font-weight: 600; font-size: 14px; }
+  .hint { color: var(--muted); font-size: 12px; margin: 4px 0 8px; line-height: 1.5; }
+  code.kbd {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+  }
+
+  .domain-card {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 10px;
+  }
+  .domain-card .row { display: flex; gap: 8px; align-items: center; }
+  .domain-card .name {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 9px;
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+  .domain-card .name:focus { outline: none; border-color: var(--accent); }
+  .domain-card textarea {
+    width: 100%;
+    margin-top: 8px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 9px;
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    resize: vertical;
+    min-height: 56px;
+  }
+  .domain-card textarea:focus { outline: none; border-color: var(--accent); }
+
+  .tmpl {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    width: 100%;
+    padding: 9px;
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    resize: vertical;
+    min-height: 180px;
+    line-height: 1.5;
+    tab-size: 4;
+  }
+  .tmpl:focus { outline: none; border-color: var(--accent); }
+
+  .include-card {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 10px;
+  }
+  .include-card .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .include-card .iname {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 9px;
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+  .include-card .iname:focus { outline: none; border-color: var(--accent); }
+  .include-card textarea {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 9px;
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    resize: vertical;
+    min-height: 80px;
+  }
+  .include-card textarea:focus { outline: none; border-color: var(--accent); }
+
+  /* Preview */
+  /* 格式化工具列 */
+  .fmt-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 10px;
+    font-size: 12px;
+  }
+  .fmt-check { display: flex; align-items: center; gap: 5px; cursor: pointer; font-weight: 600; }
+  .fmt-field { display: flex; align-items: center; gap: 4px; color: var(--muted); }
+  .fmt-bar select {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 3px 6px;
+    border-radius: 5px;
+    font-size: 12px;
+    font-family: inherit;
+  }
+  .fmt-bar select:focus { outline: none; border-color: var(--accent); }
+
+  .file-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .file-tab {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 5px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .file-tab:hover { border-color: #3a4150; }
+  .file-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .preview-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .preview-meta .fname { font-family: var(--mono); color: var(--accent); font-size: 13px; }
+  .preview-out {
+    background: #0a0c10;
+    border: 1px solid var(--border);
+    color: #d6deeb;
+    padding: 12px;
+    border-radius: 8px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    white-space: pre;
+    overflow: auto;
+    line-height: 1.55;
+    min-height: 320px;
+    max-height: calc(100vh - 220px);
+  }
+  .empty { color: var(--muted); font-style: italic; }
+
+  /* 區段分隔與按鈕 */
+  .sep { border: none; border-top: 1px solid var(--border); margin: 18px 0 14px; }
+  .block-btn { margin-top: 6px; }
+
+  /* 標籤式輸入 */
+  .tags { display: flex; flex-wrap: wrap; gap: 5px; align-items: center;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 5px 6px; min-height: 34px; }
+  .tags:focus-within { border-color: var(--accent); }
+  .tag { display: inline-flex; align-items: center; gap: 4px;
+    background: var(--panel); border: 1px solid #3a4150; color: var(--text);
+    padding: 2px 4px 2px 8px; border-radius: 12px; font-family: var(--mono); font-size: 12px; }
+  .tag .x { cursor: pointer; color: var(--muted); font-size: 13px; line-height: 1; padding: 0 3px; border-radius: 50%; }
+  .tag .x:hover { color: var(--danger); background: rgba(224,85,107,.15); }
+  .tags input { flex: 1; min-width: 80px; background: transparent; border: none; color: var(--text);
+    font-family: var(--mono); font-size: 12.5px; outline: none; padding: 3px; }
+  .tags input::placeholder { color: var(--muted); }
+  .tag-label { font-size: 11px; color: var(--muted); margin: 8px 0 3px; }
+
+  /* 群組勾選 chip */
+  .gtoggles { display: flex; flex-wrap: wrap; gap: 5px; }
+  .gtoggle { cursor: pointer; user-select: none; border: 1px solid var(--border);
+    background: var(--bg); color: var(--muted); padding: 3px 10px; border-radius: 12px; font-size: 12px; }
+  .gtoggle:hover { border-color: #3a4150; }
+  .gtoggle.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  /* 讓 hljs 主題不覆蓋預覽區背景 */
+  .preview-out.hljs, .preview-out .hljs { background: transparent !important; padding: 0 !important; }
+
+  /* 分頁狀態圓點 */
+  .file-tab .dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:6px; vertical-align:middle; }
+  .file-tab .dot.ok { background: var(--ok); }
+  .file-tab .dot.err { background: var(--danger); }
+
+  /* 驗證面板 */
+  .validation { margin-top: 10px; font-size: 12.5px; }
+  .val-ok { color: var(--ok); display:flex; align-items:center; gap:6px; }
+  .val-title { color: #e0a543; margin-bottom: 5px; font-weight: 600; }
+  .val-item { color: var(--danger); font-family: var(--mono); padding: 2px 0; line-height:1.4; }
+  .val-item .ln { color: var(--muted); margin-right: 6px; }
+  .val-summary { color: var(--muted); font-size: 12px; margin-top: 4px; }
+
+  .badge {
+    display: inline-block;
+    background: var(--panel-2);
+    color: var(--muted);
+    border: 1px solid var(--border);
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 11px;
+    margin-left: 6px;
+  }
+
+  .toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--ok);
+    color: #fff;
+    padding: 9px 18px;
+    border-radius: 8px;
+    font-size: 13px;
+    opacity: 0;
+    transition: opacity .25s, transform .25s;
+    pointer-events: none;
+    z-index: 100;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  @media (max-width: 1100px) {
+    main { grid-template-columns: 1fr; grid-auto-rows: auto; }
+    .col { max-height: none; }
+  }
+  /* 大螢幕：第一欄放寬，子網域群組與網域並排 */
+  @media (min-width: 1280px) {
+    main { grid-template-columns: minmax(540px, 1.1fr) 360px 1.3fr; }
+    .split-wrap { flex-direction: row; gap: 18px; }
+    .split-wrap > .panel { flex: 1 1 0; }
+  }
+ </style>
+</head>
+<body>
+
+<header>
+  <h1>NGINX Config 產生器</h1>
+  <span class="badge" id="autosaveBadge">自動儲存</span>
+  <span class="spacer"></span>
+  <button class="btn" id="importBtn">匯入設定</button>
+  <button class="btn" id="exportJsonBtn">匯出設定</button>
+  <button class="btn btn-danger" id="clearBtn">清除全部</button>
+  <button class="btn btn-primary" id="exportZipBtn">匯出全部 .conf (ZIP)</button>
+  <input type="file" id="importFile" accept=".json" style="display:none">
+</header>
+
+<main>
+  <!-- COLUMN 1: Groups & Domains -->
+  <div class="col col-split">
+    <div class="split-wrap">
+      <div class="panel">
+        <h2>子網域群組</h2>
+        <div class="hint">定義可重複使用的子網域集合，網域可勾選多個群組套用。</div>
+        <div id="groupList"></div>
+        <button class="btn btn-primary btn-sm block-btn" id="addGroupBtn">+ 新增群組</button>
+      </div>
+      <div class="panel">
+        <h2>網域</h2>
+        <div class="hint">每個網域產生一個 <code class="kbd">網域.conf</code>。勾選群組，並可加入專屬子網域。</div>
+        <div id="domainList"></div>
+        <button class="btn btn-primary btn-sm block-btn" id="addDomainBtn">+ 新增網域</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- COLUMN 2: Templates -->
+  <div class="col">
+    <h2>模板設定</h2>
+
+    <div class="section">
+      <div class="section-title">
+        <span>Server 區塊模板</span>
+        <button class="btn btn-sm" id="formatTemplateBtn">格式化模板</button>
+      </div>
+      <div class="hint">
+        每個子網域會產生一個 server 區塊。可用變數：<br>
+        <code class="kbd">{SERVER_NAME}</code> → 子網域.網域<br>
+        <code class="kbd">{DOMAIN}</code> → 網域 &nbsp;
+        <code class="kbd">{SUBDOMAIN}</code> → 子網域
+      </div>
+      <textarea class="tmpl" id="serverTemplate" spellcheck="false"></textarea>
+    </div>
+
+    <div class="section">
+      <div class="section-title">
+        <span>Include 檔案</span>
+        <button class="btn btn-sm" id="addIncludeBtn">+ 新增</button>
+      </div>
+      <div class="hint">這些檔案會原封不動匯出，可在 Server 模板內用 <code class="kbd">include 檔名;</code> 引用。</div>
+      <div id="includeList"></div>
+    </div>
+  </div>
+
+  <!-- COLUMN 3: Preview -->
+  <div class="col">
+    <h2>預覽 &amp; 匯出</h2>
+    <div class="fmt-bar">
+      <label class="fmt-check"><input type="checkbox" id="fmtEnabled"> 自動格式化</label>
+      <span class="fmt-field">縮排
+        <select id="fmtIndent">
+          <option value="tab">Tab</option>
+          <option value="2">2 空格</option>
+          <option value="4">4 空格</option>
+        </select>
+      </span>
+      <span class="fmt-field">對齊
+        <select id="fmtAlign">
+          <option value="1">對齊值欄</option>
+          <option value="0">單一空格</option>
+        </select>
+      </span>
+      <span class="fmt-field">大括號
+        <select id="fmtBrace">
+          <option value="new">換行 {</option>
+          <option value="same">同行 {</option>
+        </select>
+      </span>
+    </div>
+    <div class="file-tabs" id="fileTabs"></div>
+    <div class="preview-meta">
+      <span class="fname" id="previewName">—</span>
+      <span>
+        <button class="btn btn-sm" id="copyBtn">複製</button>
+        <button class="btn btn-sm" id="downloadOneBtn">下載此檔</button>
+      </span>
+    </div>
+    <pre class="preview-out" id="previewOut"></pre>
+    <div class="validation" id="validationPanel"></div>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+
+/* ----------------------- State ----------------------- */
+const STORAGE_KEY = "nginx_conf_generator_v1";
+
+const DEFAULT_STATE = {
+  groups: [
+    { id: "g_std", name: "標準", subdomains: ["md", "hr", "acc"] }
+  ],
+  domains: [
+    { name: "aaa.com", groupIds: ["g_std"], subdomains: [] },
+    { name: "bbb.com", groupIds: ["g_std"], subdomains: [] }
+  ],
+  serverTemplate:
+`server
+{
+\tlisten\t80;
+\tserver_name\t{SERVER_NAME};
+
+\tinclude protect.conf;
+}`,
+  includeFiles: [
+    {
+      name: "protect.conf",
+      content:
+`# protect.conf
+location ~ /\\.(git|env) {
+\tdeny all;
+}`
+    }
+  ],
+  format: { enabled: true, indent: "tab", align: true, brace: "new" }
+};
+
+let state = loadState();
+let activeFile = null;
+
+function loadState() {
+  const defaults = JSON.parse(JSON.stringify(DEFAULT_STATE));
+  const ensureGid = (g) => ({ id: g.id || gid(), name: g.name || "群組", subdomains: arr(g.subdomains) });
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const s = JSON.parse(raw);
+      return {
+        groups: Array.isArray(s.groups) ? s.groups.map(ensureGid) : defaults.groups,
+        domains: (Array.isArray(s.domains) ? s.domains : defaults.domains).map(d => ({
+          name: typeof d.name === "string" ? d.name : "",
+          groupIds: Array.isArray(d.groupIds) ? d.groupIds : [],
+          subdomains: arr(d.subdomains)
+        })),
+        serverTemplate: typeof s.serverTemplate === "string" ? s.serverTemplate : "",
+        includeFiles: Array.isArray(s.includeFiles) ? s.includeFiles : [],
+        format: Object.assign(defaults.format, typeof s.format === "object" && s.format ? s.format : {})
+      };
+    }
+  } catch (e) { console.warn("load failed", e); }
+  return defaults;
+}
+
+// 穩定的群組 id 產生
+function gid() { return "g_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+// 各種來源轉成子網域陣列（相容舊版字串）
+function arr(v) {
+  if (Array.isArray(v)) return v.map(x => String(x).trim()).filter(Boolean);
+  if (typeof v === "string") return parseList(v);
+  return [];
+}
+
+let saveTimer = null;
+function saveState() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    flashBadge();
+  }, 300);
+}
+
+/* ----------------------- Helpers ----------------------- */
+function parseList(text) {
+  return (text || "")
+    .split(/[\s,]+/)
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/* ----------------------- NGINX 語法驗證 ----------------------- */
+function tokenizeNginx(text) {
+  const tokens = [];
+  let i = 0, line = 1;
+  const n = text.length;
+  while (i < n) {
+    const c = text[i];
+    if (c === "\n") { line++; i++; continue; }
+    if (/\s/.test(c)) { i++; continue; }
+    if (c === "#") {
+      let end = text.indexOf("\n", i); if (end === -1) end = n;
+      tokens.push({ type: "comment", line, value: text.slice(i, end) }); i = end;
+    } else if (c === '"' || c === "'") {
+      const q = c; let j = i + 1;
+      while (j < n && text[j] !== q) { if (text[j] === "\\") j++; if (text[j] === "\n") line++; j++; }
+      tokens.push({ type: "string", line, value: text.slice(i, Math.min(j + 1, n)) }); i = j + 1;
+    } else if (c === "{") { tokens.push({ type: "lbrace", line }); i++; }
+      else if (c === "}") { tokens.push({ type: "rbrace", line }); i++; }
+      else if (c === ";") { tokens.push({ type: "semicolon", line }); i++; }
+      else {
+        let j = i;
+        while (j < n && !/[\s{};#"']/.test(text[j])) j++;
+        tokens.push({ type: "word", value: text.slice(i, j), line }); i = j;
+      }
+  }
+  return tokens;
+}
+
+// 回傳錯誤陣列 {line, msg}；空陣列代表通過
+function validateNginx(text) {
+  const errors = [];
+  const toks = tokenizeNginx(text).filter(t => t.type !== "comment");
+  let depth = 0, i = 0;
+  while (i < toks.length) {
+    const t = toks[i];
+    if (t.type === "semicolon") {
+      errors.push({ line: t.line, msg: "多餘的分號（前方無指令）" }); i++; continue;
+    }
+    if (t.type === "lbrace") {
+      errors.push({ line: t.line, msg: "區塊 { 前缺少指令名稱" }); depth++; i++; continue;
+    }
+    if (t.type === "rbrace") {
+      depth--;
+      if (depth < 0) { errors.push({ line: t.line, msg: "多餘的右大括號 }" }); depth = 0; }
+      i++; continue;
+    }
+    if (t.type === "string") { i++; continue; }
+    // word: 指令名稱
+    const name = t.value, dline = t.line; i++;
+    while (i < toks.length && (toks[i].type === "word" || toks[i].type === "string")) i++;
+    if (i >= toks.length) { errors.push({ line: dline, msg: '指令 "' + name + '" 未以 ; 或 { 結尾' }); break; }
+    if (toks[i].type === "semicolon") { i++; continue; }
+    if (toks[i].type === "lbrace") { depth++; i++; continue; }
+    errors.push({ line: dline, msg: '指令 "' + name + '" 未以 ; 或 { 結尾' });
+  }
+  if (depth > 0) errors.push({ line: 0, msg: "缺少 " + depth + " 個右大括號 }" });
+  return errors;
+}
+
+function highlightNginx(code) {
+  if (window.hljs && hljs.getLanguage && hljs.getLanguage("nginx")) {
+    try { return hljs.highlight(code, { language: "nginx" }).value; } catch (e) {}
+  }
+  return escapeHtml(code);
+}
+
+/* ----------------------- NGINX 自動格式化 ----------------------- */
+function currentFormatOpts() {
+  const f = state.format || {};
+  return {
+    indent: f.indent || "tab",     // "tab" | "2" | "4"
+    align: f.align !== false,      // 對齊值欄
+    brace: f.brace || "new"        // "new" | "same"
+  };
+}
+
+function formatNginx(text, opts) {
+  opts = opts || currentFormatOpts();
+  const unit = opts.indent === "2" ? "  " : opts.indent === "4" ? "    " : "\t";
+  const braceSame = opts.brace === "same";
+  const align = opts.align !== false;
+
+  const tokens = tokenizeNginx(text);
+  const lines = [];
+  let depth = 0, i = 0;
+  const n = tokens.length;
+
+  while (i < n) {
+    const t = tokens[i];
+    if (t.type === "comment") { lines.push({ type: "comment", depth, text: t.value }); i++; continue; }
+    if (t.type === "rbrace") { depth = Math.max(0, depth - 1); lines.push({ type: "close", depth }); i++; continue; }
+    if (t.type === "string") { i++; continue; }
+    if (t.type === "word") {
+      const parts = [t.value]; i++;
+      while (i < n && (tokens[i].type === "word" || tokens[i].type === "string")) {
+        parts.push(tokens[i].value || ""); i++;
+      }
+      let openbrace = false;
+      if (i < n && tokens[i].type === "lbrace") { openbrace = true; i++; }
+      else if (i < n && tokens[i].type === "semicolon") { i++; }
+      lines.push({ type: "dir", depth, name: parts[0], args: parts.slice(1), openbrace });
+      if (openbrace) depth++;
+      continue;
+    }
+    i++;
+  }
+
+  const pad = (s, len) => s + " ".repeat(Math.max(0, len - s.length));
+  const out = [];
+  let group = [];
+  const emitDir = (g, maxName) => {
+    const ind = unit.repeat(g.depth);
+    let head;
+    if (g.args.length === 0) {
+      head = g.name;
+    } else if (align) {
+      head = pad(g.name, maxName) + " " + g.args.join(" ");
+    } else {
+      head = g.name + " " + g.args.join(" ");
+    }
+    if (g.openbrace) {
+      out.push(braceSame ? ind + head + " {" : ind + head + "\n" + unit.repeat(g.depth) + "{");
+    } else {
+      out.push(ind + head + ";");
+    }
+  };
+  const flush = () => {
+    if (!group.length) return;
+    let mx = 0; for (const g of group) mx = Math.max(mx, g.name.length);
+    for (const g of group) emitDir(g, mx);
+    group = [];
+  };
+
+  // 把連續註解合併成區塊，方便判斷橫幅（banner）
+  const isRule = (txt) => /^#\s*=+\s*$/.test((txt || "").trim());
+  const blocks = [];
+  let cbuf = [];
+  const flushCbuf = () => { if (cbuf.length) { blocks.push({ type: "commentblock", comments: cbuf }); cbuf = []; } };
+  for (const ln of lines) {
+    if (ln.type === "comment") cbuf.push(ln);
+    else { flushCbuf(); blocks.push(ln); }
+  }
+  flushCbuf();
+
+  for (const ln of blocks) {
+    if (ln.type === "dir" && !ln.openbrace) {
+      if (group.length && group[0].depth !== ln.depth) flush();
+      group.push(ln);
+    } else {
+      flush();
+      if (ln.type === "dir") emitDir(ln, ln.name.length);
+      else if (ln.type === "close") out.push(unit.repeat(ln.depth) + "}");
+      else if (ln.type === "commentblock") {
+        const banner = ln.comments.some(c => isRule(c.text));
+        if (banner && out.length && out[out.length - 1] !== "") out.push("");
+        for (const c of ln.comments) {
+          out.push(c.text ? unit.repeat(c.depth) + c.text : "");
+        }
+      }
+    }
+  }
+  flush();
+  return out.join("\n").replace(/\n{3,}/g, "\n\n") + "\n";
+}
+
+function toast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove("show"), 1600);
+}
+
+function flashBadge() {
+  const b = document.getElementById("autosaveBadge");
+  b.style.color = "var(--ok)";
+  clearTimeout(flashBadge._t);
+  flashBadge._t = setTimeout(() => { b.style.color = ""; }, 600);
+}
+
+/* ----------------------- Generation ----------------------- */
+function buildFiles() {
+  const files = {}; // name -> content
+  const tmpl = state.serverTemplate || "";
+  const fmtEnabled = state.format && state.format.enabled;
+
+  for (const d of state.domains) {
+    const domain = (d.name || "").trim();
+    if (!domain) continue;
+    const subs = domainSubdomains(d);
+    let blocks = [];
+
+    if (subs.length === 0) {
+      blocks.push(fillTemplate(tmpl, { SERVER_NAME: domain, DOMAIN: domain, SUBDOMAIN: "" }));
+    } else {
+      for (const sub of subs) {
+        const serverName = sub + "." + domain;
+        blocks.push(fillTemplate(tmpl, { SERVER_NAME: serverName, DOMAIN: domain, SUBDOMAIN: sub }));
+      }
+    }
+
+    let content = blocks.join("\n\n") + "\n";
+    if (fmtEnabled) {
+      try { content = formatNginx(blocks.join("\n"), currentFormatOpts()); } catch (e) { /* 保留原內容 */ }
+    }
+    files[domain + ".conf"] = content;
+  }
+
+  for (const inc of state.includeFiles) {
+    const nm = (inc.name || "").trim();
+    if (!nm) continue;
+    let c = inc.content || "";
+    if (fmtEnabled) {
+      try { c = formatNginx(c, currentFormatOpts()); } catch (e) { /* 保留原內容 */ }
+    }
+    files[nm] = c;
+  }
+
+  return files;
+}
+
+function fillTemplate(tmpl, vars) {
+  let out = tmpl;
+  for (const [k, v] of Object.entries(vars)) {
+    out = out.split("{" + k + "}").join(v);
+  }
+  return out;
+}
+
+/* ----------------------- 子網域解析 ----------------------- */
+// 取得網域最終套用的子網域（群組聯集 ＋ 專屬）
+function domainSubdomains(d) {
+  const set = new Set();
+  for (const id of (d.groupIds || [])) {
+    const g = state.groups.find(x => x.id === id);
+    if (g) (g.subdomains || []).forEach(s => set.add(s));
+  }
+  (d.subdomains || []).forEach(s => set.add(s));
+  return [...set];
+}
+
+// 標籤式輸入元件：arr 為_live 陣列，onChange 為變更後回呼
+function createTagInput(host, arr, onChange, placeholder) {
+  host.className = "tags";
+  host.innerHTML = "";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.spellcheck = false;
+  input.placeholder = placeholder || "輸入後 Enter";
+  const render = () => {
+    [...host.querySelectorAll(".tag")].forEach(el => el.remove());
+    arr.forEach((val, idx) => {
+      const chip = document.createElement("span");
+      chip.className = "tag";
+      const txt = document.createElement("span"); txt.textContent = val;
+      const x = document.createElement("span"); x.className = "x"; x.textContent = "×";
+      x.addEventListener("click", () => { arr.splice(idx, 1); onChange(); render(); });
+      chip.appendChild(txt); chip.appendChild(x);
+      host.insertBefore(chip, input);
+    });
+  };
+  const addVal = (raw) => {
+    const parts = (raw || "").split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
+    if (!parts.length) { input.value = ""; return; }
+    let changed = false;
+    parts.forEach(v => { if (!arr.includes(v)) { arr.push(v); changed = true; } });
+    input.value = "";
+    if (changed) onChange();
+    render();
+  };
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === ",") { e.preventDefault(); if (input.value.trim()) addVal(input.value); }
+    else if (e.key === "Backspace" && input.value === "") { if (arr.length) { arr.pop(); onChange(); render(); } }
+  });
+  input.addEventListener("blur", () => { if (input.value.trim()) addVal(input.value); });
+  host.appendChild(input);
+  render();
+}
+
+function refreshBadges() {
+  document.querySelectorAll("#domainList .domain-card").forEach(card => {
+    const d = state.domains[+card.dataset.idx];
+    if (!d) return;
+    const b = card.querySelector(".badge");
+    if (b) b.textContent = domainSubdomains(d).length + " 個子網域";
+  });
+}
+
+/* ----------------------- Render: Groups ----------------------- */
+function renderGroups() {
+  const wrap = document.getElementById("groupList");
+  wrap.innerHTML = "";
+  if (state.groups.length === 0) {
+    wrap.innerHTML = '<div class="empty" style="margin:6px 0">尚無群組，按下方新增。</div>';
+    return;
+  }
+  state.groups.forEach((g, i) => {
+    const card = document.createElement("div");
+    card.className = "domain-card";
+    card.innerHTML = `
+      <div class="row">
+        <input class="name" placeholder="群組名稱" value="${escapeHtml(g.name)}">
+        <button class="btn btn-sm btn-danger" title="刪除群組">✕</button>
+      </div>
+      <div class="tag-label">子網域</div>
+      <div class="tags-host"></div>
+    `;
+    const nameInput = card.querySelector(".name");
+    const host = card.querySelector(".tags-host");
+    const delBtn = card.querySelector(".btn-danger");
+    nameInput.addEventListener("input", () => { g.name = nameInput.value; saveState(); renderDomains(); renderPreview(); });
+    createTagInput(host, g.subdomains, () => { saveState(); refreshBadges(); renderPreview(); }, "輸入子網域後 Enter");
+    delBtn.addEventListener("click", () => {
+      state.domains.forEach(d => { d.groupIds = (d.groupIds || []).filter(id => id !== g.id); });
+      state.groups.splice(i, 1);
+      saveState(); renderGroups(); renderDomains(); renderPreview();
+    });
+    wrap.appendChild(card);
+  });
+}
+
+/* ----------------------- Render: Domains ----------------------- */
+function renderDomains() {
+  const wrap = document.getElementById("domainList");
+  wrap.innerHTML = "";
+  state.domains.forEach((d, i) => {
+    const card = document.createElement("div");
+    card.className = "domain-card";
+    card.dataset.idx = i;
+    const n = domainSubdomains(d).length;
+    card.innerHTML = `
+      <div class="row">
+        <input class="name" placeholder="example.com" value="${escapeHtml(d.name)}">
+        <span class="badge">${n} 個子網域</span>
+        <button class="btn btn-sm btn-danger" title="刪除網域">✕</button>
+      </div>
+      <div class="tag-label">套用群組</div>
+      <div class="gtoggles"></div>
+      <div class="tag-label">專屬子網域</div>
+      <div class="tags-host"></div>
+    `;
+    const nameInput = card.querySelector(".name");
+    const togglesHost = card.querySelector(".gtoggles");
+    const host = card.querySelector(".tags-host");
+    const badge = card.querySelector(".badge");
+    const delBtn = card.querySelector(".btn-danger");
+
+    nameInput.addEventListener("input", () => { d.name = nameInput.value; saveState(); renderPreview(); });
+
+    const renderToggles = () => {
+      togglesHost.innerHTML = "";
+      if (state.groups.length === 0) {
+        togglesHost.innerHTML = '<span class="empty" style="font-size:12px">無群組</span>';
+        return;
+      }
+      state.groups.forEach(g => {
+        const on = (d.groupIds || []).includes(g.id);
+        const chip = document.createElement("span");
+        chip.className = "gtoggle" + (on ? " on" : "");
+        chip.textContent = g.name || "(未命名)";
+        chip.title = on ? "已套用，點擊移除" : "點擊套用";
+        chip.addEventListener("click", () => {
+          d.groupIds = d.groupIds || [];
+          const k = d.groupIds.indexOf(g.id);
+          if (k >= 0) d.groupIds.splice(k, 1); else d.groupIds.push(g.id);
+          saveState();
+          badge.textContent = domainSubdomains(d).length + " 個子網域";
+          renderToggles(); renderPreview();
+        });
+        togglesHost.appendChild(chip);
+      });
+    };
+    renderToggles();
+
+    createTagInput(host, d.subdomains, () => { saveState(); badge.textContent = domainSubdomains(d).length + " 個子網域"; renderPreview(); }, "專屬子網域，輸入後 Enter");
+
+    delBtn.addEventListener("click", () => { state.domains.splice(i, 1); saveState(); renderDomains(); renderPreview(); });
+
+    wrap.appendChild(card);
+  });
+}
+
+/* ----------------------- Render: Templates ----------------------- */
+function renderTemplates() {
+  const ta = document.getElementById("serverTemplate");
+  ta.value = state.serverTemplate;
+  renderIncludes();
+  renderFormatBar();
+}
+
+function renderFormatBar() {
+  const f = state.format || {};
+  document.getElementById("fmtEnabled").checked = !!f.enabled;
+  document.getElementById("fmtIndent").value = f.indent || "tab";
+  document.getElementById("fmtAlign").value = f.align !== false ? "1" : "0";
+  document.getElementById("fmtBrace").value = f.brace || "new";
+}
+
+function renderIncludes() {
+  const wrap = document.getElementById("includeList");
+  wrap.innerHTML = "";
+  state.includeFiles.forEach((inc, i) => {
+    const card = document.createElement("div");
+    card.className = "include-card";
+    card.innerHTML = `
+      <div class="row">
+        <input class="iname" placeholder="protect.conf" value="${escapeHtml(inc.name)}">
+        <button class="btn btn-sm" title="格式化內容">≡</button>
+        <button class="btn btn-sm btn-danger" title="刪除">✕</button>
+      </div>
+      <textarea placeholder="include 檔案內容..." spellcheck="false">${escapeHtml(inc.content)}</textarea>
+    `;
+    const nameInput = card.querySelector(".iname");
+    const contentInput = card.querySelector("textarea");
+    const fmtBtn = card.querySelector(".btn-sm:not(.btn-danger)");
+    const delBtn = card.querySelector(".btn-danger");
+
+    nameInput.addEventListener("input", () => { inc.name = nameInput.value; saveState(); renderPreview(); });
+    contentInput.addEventListener("input", () => { inc.content = contentInput.value; saveState(); renderPreview(); });
+    fmtBtn.addEventListener("click", () => {
+      try { inc.content = formatNginx(inc.content || "", currentFormatOpts()); }
+      catch (e) { toast("格式化失敗"); return; }
+      saveState(); renderAll(); toast("已格式化 " + (inc.name || "include"));
+    });
+    delBtn.addEventListener("click", () => { state.includeFiles.splice(i, 1); saveState(); renderAll(); });
+
+    wrap.appendChild(card);
+  });
+}
+
+/* ----------------------- Render: Preview ----------------------- */
+function renderPreview() {
+  const files = buildFiles();
+  const names = Object.keys(files);
+  const tabs = document.getElementById("fileTabs");
+  const out = document.getElementById("previewOut");
+  const nameEl = document.getElementById("previewName");
+  const valPanel = document.getElementById("validationPanel");
+
+  tabs.innerHTML = "";
+
+  if (names.length === 0) {
+    out.textContent = "";
+    out.innerHTML = '<span class="empty">尚無檔案。請新增網域。</span>';
+    nameEl.textContent = "—";
+    activeFile = null;
+    valPanel.innerHTML = "";
+    return;
+  }
+
+  if (!activeFile || !files[activeFile]) activeFile = names[0];
+
+  // 預先計算每個檔案的驗證結果
+  const status = {};
+  let errCount = 0;
+  for (const n of names) {
+    const errs = validateNginx(files[n]);
+    status[n] = errs.length === 0;
+    if (!status[n]) errCount++;
+  }
+
+  names.forEach(n => {
+    const b = document.createElement("button");
+    b.className = "file-tab" + (n === activeFile ? " active" : "");
+    const dotCls = status[n] ? "ok" : "err";
+    b.innerHTML = '<span class="dot ' + dotCls + '"></span>' + escapeHtml(n);
+    b.addEventListener("click", () => { activeFile = n; renderPreview(); });
+    tabs.appendChild(b);
+  });
+
+  nameEl.textContent = activeFile;
+
+  // 語法高亮
+  out.innerHTML = highlightNginx(files[activeFile]);
+  out.className = "preview-out hljs language-nginx";
+
+  // 驗證面板（當前檔案）
+  const errs = validateNginx(files[activeFile]);
+  if (errs.length === 0) {
+    valPanel.innerHTML = '<div class="val-ok">✓ ' + escapeHtml(activeFile) + ' 通過 nginx 格式檢查</div>';
+  } else {
+    valPanel.innerHTML =
+      '<div class="val-title">⚠ ' + escapeHtml(activeFile) + ' 發現 ' + errs.length + ' 個問題</div>' +
+      errs.map(e => {
+        const ln = e.line ? '<span class="ln">行 ' + e.line + '</span>' : "";
+        return '<div class="val-item">' + ln + escapeHtml(e.msg) + '</div>';
+      }).join("");
+  }
+
+  // 整體摘要
+  if (errCount > 0) {
+    valPanel.innerHTML += '<div class="val-summary">全部 ' + names.length + ' 個檔案中，' + errCount + ' 個有格式問題</div>';
+  }
+}
+
+/* ----------------------- Actions ----------------------- */
+function renderAll() {
+  renderGroups();
+  renderDomains();
+  renderTemplates();
+  renderPreview();
+}
+
+/* --- 一次性靜態事件（避免重複綁定） --- */
+function initStaticEvents() {
+  const ta = document.getElementById("serverTemplate");
+  ta.addEventListener("input", () => {
+    state.serverTemplate = ta.value;
+    saveState(); renderPreview();
+  });
+
+  document.getElementById("formatTemplateBtn").addEventListener("click", () => {
+    try {
+      state.serverTemplate = formatNginx(state.serverTemplate || "", currentFormatOpts());
+      ta.value = state.serverTemplate;
+      saveState(); renderPreview();
+      toast("已格式化 Server 模板");
+    } catch (e) { toast("格式化失敗"); }
+  });
+
+  const onFmtChange = () => {
+    const f = state.format || (state.format = {});
+    f.enabled = document.getElementById("fmtEnabled").checked;
+    f.indent = document.getElementById("fmtIndent").value;
+    f.align = document.getElementById("fmtAlign").value === "1";
+    f.brace = document.getElementById("fmtBrace").value;
+    saveState(); renderPreview();
+  };
+  ["fmtEnabled", "fmtIndent", "fmtAlign", "fmtBrace"].forEach(id => {
+    document.getElementById(id).addEventListener("change", onFmtChange);
+  });
+}
+
+document.getElementById("addDomainBtn").addEventListener("click", () => {
+  const firstGid = state.groups[0] ? state.groups[0].id : null;
+  state.domains.push({ name: "", groupIds: firstGid ? [firstGid] : [], subdomains: [] });
+  saveState(); renderDomains(); renderPreview();
+  const inputs = document.querySelectorAll("#domainList .name");
+  if (inputs.length) inputs[inputs.length - 1].focus();
+});
+
+document.getElementById("addGroupBtn").addEventListener("click", () => {
+  state.groups.push({ id: gid(), name: "新群組", subdomains: [] });
+  saveState(); renderGroups(); renderDomains(); renderPreview();
+  const inputs = document.querySelectorAll("#groupList .name");
+  if (inputs.length) inputs[inputs.length - 1].focus();
+});
+
+document.getElementById("addIncludeBtn").addEventListener("click", () => {
+  state.includeFiles.push({ name: "", content: "" });
+  saveState(); renderAll();
+  const inputs = document.querySelectorAll("#includeList .iname");
+  if (inputs.length) inputs[inputs.length - 1].focus();
+});
+
+document.getElementById("copyBtn").addEventListener("click", async () => {
+  const files = buildFiles();
+  if (!activeFile || !files[activeFile]) { toast("沒有可複製的內容"); return; }
+  try {
+    await navigator.clipboard.writeText(files[activeFile]);
+    toast("已複製 " + activeFile);
+  } catch (e) {
+    toast("複製失敗");
+  }
+});
+
+document.getElementById("downloadOneBtn").addEventListener("click", () => {
+  const files = buildFiles();
+  if (!activeFile || !files[activeFile]) { toast("沒有可下載的檔案"); return; }
+  downloadText(activeFile, files[activeFile]);
+  toast("已下載 " + activeFile);
+});
+
+document.getElementById("exportZipBtn").addEventListener("click", () => {
+  const files = buildFiles();
+  const names = Object.keys(files);
+  if (names.length === 0) { toast("沒有可匯出的設定"); return; }
+  const zip = new JSZip();
+  for (const n of names) zip.file(n, files[n]);
+  zip.generateAsync({ type: "blob" }).then(blob => {
+    downloadBlob("nginx-configs.zip", blob);
+    toast("已匯出 ZIP (" + names.length + " 個檔案)");
+  });
+});
+
+document.getElementById("exportJsonBtn").addEventListener("click", () => {
+  downloadText("nginx-config-settings.json", JSON.stringify(state, null, 2));
+  toast("設定已匯出");
+});
+
+document.getElementById("importBtn").addEventListener("click", () => {
+  document.getElementById("importFile").click();
+});
+
+document.getElementById("importFile").addEventListener("change", (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const s = JSON.parse(reader.result);
+      state = {
+        groups: Array.isArray(s.groups) ? s.groups.map(g => ({ id: g.id || gid(), name: g.name || "群組", subdomains: arr(g.subdomains) })) : [],
+        domains: (Array.isArray(s.domains) ? s.domains : []).map(d => ({
+          name: typeof d.name === "string" ? d.name : "",
+          groupIds: Array.isArray(d.groupIds) ? d.groupIds : [],
+          subdomains: arr(d.subdomains)
+        })),
+        serverTemplate: typeof s.serverTemplate === "string" ? s.serverTemplate : "",
+        includeFiles: Array.isArray(s.includeFiles) ? s.includeFiles : [],
+        format: typeof s.format === "object" && s.format ? s.format : { enabled: true, indent: "tab", align: true, brace: "new" }
+      };
+      saveState(); renderAll();
+      toast("設定已匯入");
+    } catch (err) {
+      toast("匯入失敗：格式錯誤");
+    }
+  };
+  reader.readAsText(f);
+  e.target.value = "";
+});
+
+document.getElementById("clearBtn").addEventListener("click", () => {
+  if (!confirm("確定清除全部設定？此操作無法復原。")) return;
+  state = { groups: [], domains: [], serverTemplate: "", includeFiles: [], format: { enabled: true, indent: "tab", align: true, brace: "new" } };
+  saveState(); renderAll();
+  toast("已清除");
+});
+
+/* ----------------------- Download utils ----------------------- */
+function downloadText(filename, text) {
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  downloadBlob(filename, blob);
+}
+function downloadBlob(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/* ----------------------- Init ----------------------- */
+initStaticEvents();
+renderAll();
+</script>
+</body>
+</html>
