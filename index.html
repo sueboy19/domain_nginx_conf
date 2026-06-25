@@ -384,7 +384,8 @@
         每個子網域會產生一個 server 區塊。可用變數：<br>
         <code class="kbd">{SERVER_NAME}</code> → 子網域.網域<br>
         <code class="kbd">{DOMAIN}</code> → 網域 &nbsp;
-        <code class="kbd">{SUBDOMAIN}</code> → 子網域
+        <code class="kbd">{SUBDOMAIN}</code> → 子網域<br>
+        <code class="kbd">{DOMAIN_CONF}</code> → 網域專用指令（每個網域卡片輸入）
       </div>
       <textarea class="tmpl" id="serverTemplate" spellcheck="false"></textarea>
     </div>
@@ -459,6 +460,7 @@ const DEFAULT_STATE = {
 \tlisten\t80;
 \tserver_name\t{SERVER_NAME};
 
+{DOMAIN_CONF}
 \tinclude protect.conf;
 }`,
   includeFiles: [
@@ -489,7 +491,8 @@ function loadState() {
         domains: (Array.isArray(s.domains) ? s.domains : defaults.domains).map(d => ({
           name: typeof d.name === "string" ? d.name : "",
           groupIds: Array.isArray(d.groupIds) ? d.groupIds : [],
-          subdomains: arr(d.subdomains)
+          subdomains: arr(d.subdomains),
+          conf: typeof d.conf === "string" ? d.conf : ""
         })),
         serverTemplate: typeof s.serverTemplate === "string" ? s.serverTemplate : "",
         includeFiles: Array.isArray(s.includeFiles) ? s.includeFiles : [],
@@ -724,11 +727,10 @@ function buildFiles() {
     let blocks = [];
 
     if (subs.length === 0) {
-      blocks.push(fillTemplate(tmpl, { SERVER_NAME: domain, DOMAIN: domain, SUBDOMAIN: "" }));
+      blocks.push(renderBlock(tmpl, domain, "", d.conf));
     } else {
       for (const sub of subs) {
-        const serverName = sub + "." + domain;
-        blocks.push(fillTemplate(tmpl, { SERVER_NAME: serverName, DOMAIN: domain, SUBDOMAIN: sub }));
+        blocks.push(renderBlock(tmpl, domain, sub, d.conf));
       }
     }
 
@@ -758,6 +760,14 @@ function fillTemplate(tmpl, vars) {
     out = out.split("{" + k + "}").join(v);
   }
   return out;
+}
+
+// 產生單一 server 區塊：先解析網域專用指令的內層變數，再套用模板
+function renderBlock(tmpl, domain, sub, conf) {
+  const serverName = sub ? sub + "." + domain : domain;
+  const base = { SERVER_NAME: serverName, DOMAIN: domain, SUBDOMAIN: sub || "" };
+  const confResolved = fillTemplate(conf || "", base);
+  return fillTemplate(tmpl, Object.assign({}, base, { DOMAIN_CONF: confResolved }));
 }
 
 /* ----------------------- 子網域解析 ----------------------- */
@@ -871,14 +881,18 @@ function renderDomains() {
       <div class="gtoggles"></div>
       <div class="tag-label">專屬子網域</div>
       <div class="tags-host"></div>
+      <div class="tag-label">網域專用指令 <span style="color:var(--muted);font-weight:normal">（插入 {DOMAIN_CONF}，可用 {DOMAIN}/{SERVER_NAME}）</span></div>
+      <textarea class="conf" placeholder="root /var/www/{DOMAIN};" spellcheck="false">${escapeHtml(d.conf || "")}</textarea>
     `;
     const nameInput = card.querySelector(".name");
     const togglesHost = card.querySelector(".gtoggles");
     const host = card.querySelector(".tags-host");
+    const confInput = card.querySelector("textarea.conf");
     const badge = card.querySelector(".badge");
     const delBtn = card.querySelector(".btn-danger");
 
     nameInput.addEventListener("input", () => { d.name = nameInput.value; saveState(); renderPreview(); });
+    confInput.addEventListener("input", () => { d.conf = confInput.value; saveState(); renderPreview(); });
 
     const renderToggles = () => {
       togglesHost.innerHTML = "";
@@ -1137,7 +1151,8 @@ document.getElementById("importFile").addEventListener("change", (e) => {
         domains: (Array.isArray(s.domains) ? s.domains : []).map(d => ({
           name: typeof d.name === "string" ? d.name : "",
           groupIds: Array.isArray(d.groupIds) ? d.groupIds : [],
-          subdomains: arr(d.subdomains)
+          subdomains: arr(d.subdomains),
+          conf: typeof d.conf === "string" ? d.conf : ""
         })),
         serverTemplate: typeof s.serverTemplate === "string" ? s.serverTemplate : "",
         includeFiles: Array.isArray(s.includeFiles) ? s.includeFiles : [],
