@@ -873,7 +873,7 @@ function refreshBadges() {
 // 渲染變數列（name = value），用於群組內的變數
 function renderVarRows(host, vars, onChange) {
   host.innerHTML = "";
-  if (!vars.length) {
+  if (!vars || !vars.length) {
     host.innerHTML = '<div class="empty" style="font-size:12px;margin:4px 0">無變數，按下方新增</div>';
     return;
   }
@@ -1163,7 +1163,7 @@ document.getElementById("addDomainBtn").addEventListener("click", () => {
 });
 
 document.getElementById("addGroupBtn").addEventListener("click", () => {
-  state.groups.push({ id: gid(), name: "新群組", subdomains: [] });
+  state.groups.push({ id: gid(), name: "新群組", subdomains: [], vars: [] });
   saveState(); renderGroups(); renderDomains(); renderPreview();
   const inputs = document.querySelectorAll("#groupList .name");
   if (inputs.length) inputs[inputs.length - 1].focus();
