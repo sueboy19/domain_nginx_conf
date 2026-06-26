@@ -283,6 +283,17 @@
   .gtoggle:hover { border-color: #3a4150; }
   .gtoggle.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 
+  /* 自訂變數列 */
+  .var-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+  .var-row .vname, .var-row .vval {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    padding: 6px 8px; border-radius: 6px; font-family: var(--mono); font-size: 12.5px;
+  }
+  .var-row .vname { width: 120px; flex-shrink: 0; text-transform: uppercase; }
+  .var-row .vval { flex: 1; min-width: 0; }
+  .var-row .veq { color: var(--muted); }
+  .var-row input:focus { outline: none; border-color: var(--accent); }
+
   /* 讓 hljs 主題不覆蓋預覽區背景 */
   .preview-out.hljs, .preview-out .hljs { background: transparent !important; padding: 0 !important; }
 
@@ -382,10 +393,10 @@
       </div>
       <div class="hint">
         每個子網域會產生一個 server 區塊。可用變數：<br>
-        <code class="kbd">{SERVER_NAME}</code> → 子網域.網域<br>
+        <code class="kbd">{SERVER_NAME}</code> → 子網域.網域 &nbsp;
         <code class="kbd">{DOMAIN}</code> → 網域 &nbsp;
         <code class="kbd">{SUBDOMAIN}</code> → 子網域<br>
-        <code class="kbd">{DOMAIN_CONF}</code> → 網域專用指令（每個網域卡片輸入）
+        <code class="kbd">{ROOT}</code>、<code class="kbd">{LOGDIR}</code> … → 各群組自訂的變數（在子網域群組內定義）
       </div>
       <textarea class="tmpl" id="serverTemplate" spellcheck="false"></textarea>
     </div>
@@ -448,7 +459,13 @@ const STORAGE_KEY = "nginx_conf_generator_v1";
 
 const DEFAULT_STATE = {
   groups: [
-    { id: "g_std", name: "標準", subdomains: ["md", "hr", "acc"] }
+    {
+      id: "g_std", name: "標準", subdomains: ["md", "hr", "acc"],
+      vars: [
+        { name: "ROOT", value: "/var/www/{DOMAIN}" },
+        { name: "LOGDIR", value: "/var/log/nginx" }
+      ]
+    }
   ],
   domains: [
     { name: "aaa.com", groupIds: ["g_std"], subdomains: [] },
@@ -459,8 +476,9 @@ const DEFAULT_STATE = {
 {
 \tlisten\t80;
 \tserver_name\t{SERVER_NAME};
-
-{DOMAIN_CONF}
+\troot\t{ROOT};
+\taccess_log\t{LOGDIR}/{DOMAIN}_access.log;
+\terror_log\t{LOGDIR}/{DOMAIN}_error.log;
 \tinclude protect.conf;
 }`,
   includeFiles: [
@@ -481,7 +499,7 @@ let activeFile = null;
 
 function loadState() {
   const defaults = JSON.parse(JSON.stringify(DEFAULT_STATE));
-  const ensureGid = (g) => ({ id: g.id || gid(), name: g.name || "群組", subdomains: arr(g.subdomains) });
+  const ensureGid = (g) => ({ id: g.id || gid(), name: g.name || "群組", subdomains: arr(g.subdomains), vars: arrVars(g.vars) });
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
@@ -491,8 +509,7 @@ function loadState() {
         domains: (Array.isArray(s.domains) ? s.domains : defaults.domains).map(d => ({
           name: typeof d.name === "string" ? d.name : "",
           groupIds: Array.isArray(d.groupIds) ? d.groupIds : [],
-          subdomains: arr(d.subdomains),
-          conf: typeof d.conf === "string" ? d.conf : ""
+          subdomains: arr(d.subdomains)
         })),
         serverTemplate: typeof s.serverTemplate === "string" ? s.serverTemplate : "",
         includeFiles: Array.isArray(s.includeFiles) ? s.includeFiles : [],
@@ -510,6 +527,10 @@ function arr(v) {
   if (Array.isArray(v)) return v.map(x => String(x).trim()).filter(Boolean);
   if (typeof v === "string") return parseList(v);
   return [];
+}
+// 變數陣列正規化
+function arrVars(v) {
+  return Array.isArray(v) ? v.map(x => ({ name: String(x.name || ""), value: String(x.value || "") })) : [];
 }
 
 let saveTimer = null;
@@ -723,15 +744,28 @@ function buildFiles() {
   for (const d of state.domains) {
     const domain = (d.name || "").trim();
     if (!domain) continue;
-    const subs = domainSubdomains(d);
-    let blocks = [];
+    const blocks = [];
+    const seen = new Set();
 
-    if (subs.length === 0) {
-      blocks.push(renderBlock(tmpl, domain, "", d.conf));
-    } else {
-      for (const sub of subs) {
-        blocks.push(renderBlock(tmpl, domain, sub, d.conf));
+    // 依群組順序產生：各群組的子網域套用「該群組」的變數（{ROOT} 等）
+    for (const gid of (d.groupIds || [])) {
+      const g = state.groups.find(x => x.id === gid);
+      if (!g) continue;
+      for (const sub of (g.subdomains || [])) {
+        if (seen.has(sub)) continue;
+        seen.add(sub);
+        blocks.push(renderBlock(tmpl, domain, sub, g.vars));
       }
+    }
+    // 專屬子網域：無群組變數（僅內建變數）
+    for (const sub of (d.subdomains || [])) {
+      if (seen.has(sub)) continue;
+      seen.add(sub);
+      blocks.push(renderBlock(tmpl, domain, sub, []));
+    }
+    // 沒有任何子網域 → 網域根
+    if (seen.size === 0) {
+      blocks.push(renderBlock(tmpl, domain, "", []));
     }
 
     let content = blocks.join("\n\n") + "\n";
@@ -762,12 +796,18 @@ function fillTemplate(tmpl, vars) {
   return out;
 }
 
-// 產生單一 server 區塊：先解析網域專用指令的內層變數，再套用模板
-function renderBlock(tmpl, domain, sub, conf) {
+// 產生單一 server 區塊：解析內建變數與「該子網域群組」的變數，再套用模板
+function renderBlock(tmpl, domain, sub, groupVars) {
   const serverName = sub ? sub + "." + domain : domain;
   const base = { SERVER_NAME: serverName, DOMAIN: domain, SUBDOMAIN: sub || "" };
-  const confResolved = fillTemplate(conf || "", base);
-  return fillTemplate(tmpl, Object.assign({}, base, { DOMAIN_CONF: confResolved }));
+  // 群組變數（值可引用內建變數；不覆蓋內建；名稱自動轉大寫）
+  const vars = {};
+  for (const v of (groupVars || [])) {
+    const nm = (v.name || "").trim().toUpperCase();
+    if (nm && !(nm in base)) vars[nm] = fillTemplate(v.value || "", base);
+  }
+  const full = Object.assign({}, base, vars);
+  return fillTemplate(tmpl, full);
 }
 
 /* ----------------------- 子網域解析 ----------------------- */
@@ -830,6 +870,32 @@ function refreshBadges() {
 }
 
 /* ----------------------- Render: Groups ----------------------- */
+// 渲染變數列（name = value），用於群組內的變數
+function renderVarRows(host, vars, onChange) {
+  host.innerHTML = "";
+  if (!vars.length) {
+    host.innerHTML = '<div class="empty" style="font-size:12px;margin:4px 0">無變數，按下方新增</div>';
+    return;
+  }
+  vars.forEach((v, i) => {
+    const row = document.createElement("div");
+    row.className = "var-row";
+    row.innerHTML = `
+      <input class="vname" placeholder="ROOT" value="${escapeHtml(v.name)}">
+      <span class="veq">=</span>
+      <input class="vval" placeholder="/var/www/{DOMAIN}" value="${escapeHtml(v.value)}">
+      <button class="btn btn-sm btn-danger" title="刪除">✕</button>
+    `;
+    const nameInput = row.querySelector(".vname");
+    const valInput = row.querySelector(".vval");
+    const delBtn = row.querySelector(".btn-danger");
+    nameInput.addEventListener("input", () => { v.name = nameInput.value; onChange(); });
+    valInput.addEventListener("input", () => { v.value = valInput.value; onChange(); });
+    delBtn.addEventListener("click", () => { vars.splice(i, 1); onChange(); renderVarRows(host, vars, onChange); });
+    host.appendChild(row);
+  });
+}
+
 function renderGroups() {
   const wrap = document.getElementById("groupList");
   wrap.innerHTML = "";
@@ -847,12 +913,26 @@ function renderGroups() {
       </div>
       <div class="tag-label">子網域</div>
       <div class="tags-host"></div>
+      <div class="tag-label">變數 <span style="color:var(--muted);font-weight:normal">（用 {變數名} 引用，如 {ROOT}；值可用 {DOMAIN}/{SUBDOMAIN}/{SERVER_NAME}）</span></div>
+      <div class="vars-host"></div>
+      <button class="btn btn-sm block-btn add-var" style="margin-top:4px">+ 變數</button>
     `;
     const nameInput = card.querySelector(".name");
     const host = card.querySelector(".tags-host");
+    const varsHost = card.querySelector(".vars-host");
+    const addVarBtn = card.querySelector(".add-var");
     const delBtn = card.querySelector(".btn-danger");
     nameInput.addEventListener("input", () => { g.name = nameInput.value; saveState(); renderDomains(); renderPreview(); });
     createTagInput(host, g.subdomains, () => { saveState(); refreshBadges(); renderPreview(); }, "輸入子網域後 Enter");
+    const onChangeVar = () => { saveState(); renderPreview(); };
+    renderVarRows(varsHost, g.vars, onChangeVar);
+    addVarBtn.addEventListener("click", () => {
+      g.vars.push({ name: "", value: "" });
+      onChangeVar();
+      renderVarRows(varsHost, g.vars, onChangeVar);
+      const ins = varsHost.querySelectorAll(".vname");
+      if (ins.length) ins[ins.length - 1].focus();
+    });
     delBtn.addEventListener("click", () => {
       state.domains.forEach(d => { d.groupIds = (d.groupIds || []).filter(id => id !== g.id); });
       state.groups.splice(i, 1);
@@ -881,18 +961,14 @@ function renderDomains() {
       <div class="gtoggles"></div>
       <div class="tag-label">專屬子網域</div>
       <div class="tags-host"></div>
-      <div class="tag-label">網域專用指令 <span style="color:var(--muted);font-weight:normal">（插入 {DOMAIN_CONF}，可用 {DOMAIN}/{SERVER_NAME}）</span></div>
-      <textarea class="conf" placeholder="root /var/www/{DOMAIN};" spellcheck="false">${escapeHtml(d.conf || "")}</textarea>
     `;
     const nameInput = card.querySelector(".name");
     const togglesHost = card.querySelector(".gtoggles");
     const host = card.querySelector(".tags-host");
-    const confInput = card.querySelector("textarea.conf");
     const badge = card.querySelector(".badge");
     const delBtn = card.querySelector(".btn-danger");
 
     nameInput.addEventListener("input", () => { d.name = nameInput.value; saveState(); renderPreview(); });
-    confInput.addEventListener("input", () => { d.conf = confInput.value; saveState(); renderPreview(); });
 
     const renderToggles = () => {
       togglesHost.innerHTML = "";
@@ -1147,12 +1223,11 @@ document.getElementById("importFile").addEventListener("change", (e) => {
     try {
       const s = JSON.parse(reader.result);
       state = {
-        groups: Array.isArray(s.groups) ? s.groups.map(g => ({ id: g.id || gid(), name: g.name || "群組", subdomains: arr(g.subdomains) })) : [],
+        groups: Array.isArray(s.groups) ? s.groups.map(g => ({ id: g.id || gid(), name: g.name || "群組", subdomains: arr(g.subdomains), vars: arrVars(g.vars) })) : [],
         domains: (Array.isArray(s.domains) ? s.domains : []).map(d => ({
           name: typeof d.name === "string" ? d.name : "",
           groupIds: Array.isArray(d.groupIds) ? d.groupIds : [],
-          subdomains: arr(d.subdomains),
-          conf: typeof d.conf === "string" ? d.conf : ""
+          subdomains: arr(d.subdomains)
         })),
         serverTemplate: typeof s.serverTemplate === "string" ? s.serverTemplate : "",
         includeFiles: Array.isArray(s.includeFiles) ? s.includeFiles : [],
