@@ -268,9 +268,15 @@
   .tags:focus-within { border-color: var(--accent); }
   .tag { display: inline-flex; align-items: center; gap: 4px;
     background: var(--panel); border: 1px solid #3a4150; color: var(--text);
-    padding: 2px 4px 2px 8px; border-radius: 12px; font-family: var(--mono); font-size: 12px; }
+    padding: 2px 4px 2px 8px; border-radius: 12px; font-family: var(--mono); font-size: 12px;
+    user-select: none; -webkit-user-select: none; }
   .tag .x { cursor: pointer; color: var(--muted); font-size: 13px; line-height: 1; padding: 0 3px; border-radius: 50%; }
   .tag .x:hover { color: var(--danger); background: rgba(224,85,107,.15); }
+  .tag[draggable="true"] { cursor: grab; }
+  .tag.dragging { opacity: .35; }
+  .tag.drag-over { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .btn-sm.move-up, .btn-sm.move-down { padding: 4px 7px; }
+  .btn-sm:disabled { opacity: .35; cursor: not-allowed; }
   .tags input { flex: 1; min-width: 80px; background: transparent; border: none; color: var(--text);
     font-family: var(--mono); font-size: 12.5px; outline: none; padding: 3px; }
   .tags input::placeholder { color: var(--muted); }
@@ -830,18 +836,45 @@ function createTagInput(host, arr, onChange, placeholder) {
   input.type = "text";
   input.spellcheck = false;
   input.placeholder = placeholder || "輸入後 Enter";
+  let dragIdx = null;
   const render = () => {
     [...host.querySelectorAll(".tag")].forEach(el => el.remove());
     arr.forEach((val, idx) => {
       const chip = document.createElement("span");
       chip.className = "tag";
+      chip.draggable = true;
+      chip.title = "拖曳以調整順序";
       const txt = document.createElement("span"); txt.textContent = val;
       const x = document.createElement("span"); x.className = "x"; x.textContent = "×";
       x.addEventListener("click", () => { arr.splice(idx, 1); onChange(); render(); });
       chip.appendChild(txt); chip.appendChild(x);
+      // 拖曳排序
+      chip.addEventListener("dragstart", (e) => { dragIdx = idx; chip.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", String(idx)); });
+      chip.addEventListener("dragend", () => { chip.classList.remove("dragging"); chip.classList.remove("drag-over"); dragIdx = null; });
+      chip.addEventListener("dragover", (e) => { e.preventDefault(); chip.classList.add("drag-over"); });
+      chip.addEventListener("dragleave", () => { chip.classList.remove("drag-over"); });
+      chip.addEventListener("drop", (e) => {
+        e.preventDefault(); e.stopPropagation();
+        chip.classList.remove("drag-over");
+        if (dragIdx === null || dragIdx === idx) return;
+        const moved = arr.splice(dragIdx, 1)[0];
+        arr.splice(idx, 0, moved);
+        dragIdx = null;
+        onChange(); render();
+      });
       host.insertBefore(chip, input);
     });
   };
+  // 拖到空白處 → 移到最後
+  host.addEventListener("dragover", (e) => { e.preventDefault(); });
+  host.addEventListener("drop", (e) => {
+    if (dragIdx === null) return;
+    e.preventDefault();
+    const moved = arr.splice(dragIdx, 1)[0];
+    arr.push(moved);
+    dragIdx = null;
+    onChange(); render();
+  });
   const addVal = (raw) => {
     const parts = (raw || "").split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
     if (!parts.length) { input.value = ""; return; }
@@ -858,6 +891,14 @@ function createTagInput(host, arr, onChange, placeholder) {
   input.addEventListener("blur", () => { if (input.value.trim()) addVal(input.value); });
   host.appendChild(input);
   render();
+}
+
+// 陣列項目上下移動
+function moveItem(arr, i, dir, after) {
+  const j = i + dir;
+  if (j < 0 || j >= arr.length) return;
+  const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+  after();
 }
 
 function refreshBadges() {
@@ -908,6 +949,8 @@ function renderGroups() {
     card.className = "domain-card";
     card.innerHTML = `
       <div class="row">
+        <button class="btn btn-sm move-up" title="上移" ${i === 0 ? "disabled" : ""}>↑</button>
+        <button class="btn btn-sm move-down" title="下移" ${i === state.groups.length - 1 ? "disabled" : ""}>↓</button>
         <input class="name" placeholder="群組名稱" value="${escapeHtml(g.name)}">
         <button class="btn btn-sm btn-danger" title="刪除群組">✕</button>
       </div>
@@ -922,6 +965,8 @@ function renderGroups() {
     const varsHost = card.querySelector(".vars-host");
     const addVarBtn = card.querySelector(".add-var");
     const delBtn = card.querySelector(".btn-danger");
+    card.querySelector(".move-up").addEventListener("click", () => moveItem(state.groups, i, -1, () => { saveState(); renderGroups(); renderDomains(); renderPreview(); }));
+    card.querySelector(".move-down").addEventListener("click", () => moveItem(state.groups, i, 1, () => { saveState(); renderGroups(); renderDomains(); renderPreview(); }));
     nameInput.addEventListener("input", () => { g.name = nameInput.value; saveState(); renderDomains(); renderPreview(); });
     createTagInput(host, g.subdomains, () => { saveState(); refreshBadges(); renderPreview(); }, "輸入子網域後 Enter");
     const onChangeVar = () => { saveState(); renderPreview(); };
@@ -953,6 +998,8 @@ function renderDomains() {
     const n = domainSubdomains(d).length;
     card.innerHTML = `
       <div class="row">
+        <button class="btn btn-sm move-up" title="上移" ${i === 0 ? "disabled" : ""}>↑</button>
+        <button class="btn btn-sm move-down" title="下移" ${i === state.domains.length - 1 ? "disabled" : ""}>↓</button>
         <input class="name" placeholder="example.com" value="${escapeHtml(d.name)}">
         <span class="badge">${n} 個子網域</span>
         <button class="btn btn-sm btn-danger" title="刪除網域">✕</button>
@@ -967,6 +1014,8 @@ function renderDomains() {
     const host = card.querySelector(".tags-host");
     const badge = card.querySelector(".badge");
     const delBtn = card.querySelector(".btn-danger");
+    card.querySelector(".move-up").addEventListener("click", () => moveItem(state.domains, i, -1, () => { saveState(); renderDomains(); renderPreview(); }));
+    card.querySelector(".move-down").addEventListener("click", () => moveItem(state.domains, i, 1, () => { saveState(); renderDomains(); renderPreview(); }));
 
     nameInput.addEventListener("input", () => { d.name = nameInput.value; saveState(); renderPreview(); });
 
