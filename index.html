@@ -277,6 +277,11 @@
   .tag.drag-over { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   .btn-sm.move-up, .btn-sm.move-down { padding: 4px 7px; }
   .btn-sm:disabled { opacity: .35; cursor: not-allowed; }
+  .ck { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text); margin: 6px 0; cursor: pointer; flex-wrap: wrap; }
+  .ck input { cursor: pointer; }
+  .ck select { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 3px 6px; border-radius: 5px; font-size: 12px; font-family: inherit; cursor: pointer; }
+  .ck select:focus { outline: none; border-color: var(--accent); }
+  .ck select:disabled { opacity: .5; }
   .tags input { flex: 1; min-width: 80px; background: transparent; border: none; color: var(--text);
     font-family: var(--mono); font-size: 12.5px; outline: none; padding: 3px; }
   .tags input::placeholder { color: var(--muted); }
@@ -474,8 +479,8 @@ const DEFAULT_STATE = {
     }
   ],
   domains: [
-    { name: "aaa.com", groupIds: ["g_std"], subdomains: [] },
-    { name: "bbb.com", groupIds: ["g_std"], subdomains: [] }
+    { name: "aaa.com", groupIds: ["g_std"], subdomains: [], includeRoot: false },
+    { name: "bbb.com", groupIds: ["g_std"], subdomains: [], includeRoot: false }
   ],
   serverTemplate:
 `server
@@ -515,7 +520,9 @@ function loadState() {
         domains: (Array.isArray(s.domains) ? s.domains : defaults.domains).map(d => ({
           name: typeof d.name === "string" ? d.name : "",
           groupIds: Array.isArray(d.groupIds) ? d.groupIds : [],
-          subdomains: arr(d.subdomains)
+          subdomains: arr(d.subdomains),
+          includeRoot: !!d.includeRoot,
+          rootGroupId: typeof d.rootGroupId === "string" ? d.rootGroupId : ""
         })),
         serverTemplate: typeof s.serverTemplate === "string" ? s.serverTemplate : "",
         includeFiles: Array.isArray(s.includeFiles) ? s.includeFiles : [],
@@ -753,6 +760,14 @@ function buildFiles() {
     const blocks = [];
     const seen = new Set();
 
+    // 網域根本身（aaa.com）的 server 區塊：勾選才建立，套用「指定群組」的變數（必須是已套用群組）
+    if (d.includeRoot) {
+      const ids = d.groupIds || [];
+      const rid = ids.includes(d.rootGroupId) ? d.rootGroupId : ids[0];
+      const g0 = rid ? state.groups.find(x => x.id === rid) : null;
+      blocks.push(renderBlock(tmpl, domain, "", g0 ? g0.vars : []));
+    }
+
     // 依群組順序產生：各群組的子網域套用「該群組」的變數（{ROOT} 等）
     for (const gid of (d.groupIds || [])) {
       const g = state.groups.find(x => x.id === gid);
@@ -769,8 +784,8 @@ function buildFiles() {
       seen.add(sub);
       blocks.push(renderBlock(tmpl, domain, sub, []));
     }
-    // 沒有任何子網域 → 網域根
-    if (seen.size === 0) {
+    // 完全沒有任何區塊 → 仍產生網域根，避免空檔
+    if (blocks.length === 0) {
       blocks.push(renderBlock(tmpl, domain, "", []));
     }
 
@@ -1006,18 +1021,33 @@ function renderDomains() {
       </div>
       <div class="tag-label">套用群組</div>
       <div class="gtoggles"></div>
+      <label class="ck">
+        <input type="checkbox" class="root-ck" ${d.includeRoot ? "checked" : ""}>
+        建立 <code class="kbd root-name">${escapeHtml(d.name || "網域")}</code> 本身 server，變數套用群組：
+        <select class="root-group" ${d.includeRoot ? "" : "disabled"}></select>
+      </label>
       <div class="tag-label">專屬子網域</div>
       <div class="tags-host"></div>
     `;
     const nameInput = card.querySelector(".name");
     const togglesHost = card.querySelector(".gtoggles");
     const host = card.querySelector(".tags-host");
+    const rootCk = card.querySelector(".root-ck");
+    const rootGroup = card.querySelector(".root-group");
+    const rootName = card.querySelector(".root-name");
     const badge = card.querySelector(".badge");
     const delBtn = card.querySelector(".btn-danger");
     card.querySelector(".move-up").addEventListener("click", () => moveItem(state.domains, i, -1, () => { saveState(); renderDomains(); renderPreview(); }));
     card.querySelector(".move-down").addEventListener("click", () => moveItem(state.domains, i, 1, () => { saveState(); renderDomains(); renderPreview(); }));
 
-    nameInput.addEventListener("input", () => { d.name = nameInput.value; saveState(); renderPreview(); });
+    nameInput.addEventListener("input", () => { d.name = nameInput.value; saveState(); rootName.textContent = nameInput.value || "網域"; renderPreview(); });
+    rootCk.addEventListener("change", () => {
+      d.includeRoot = rootCk.checked;
+      const ids = d.groupIds || [];
+      if (d.includeRoot && !ids.includes(d.rootGroupId)) d.rootGroupId = ids[0] || "";
+      saveState(); refreshRootGroup(); renderPreview();
+    });
+    rootGroup.addEventListener("change", () => { d.rootGroupId = rootGroup.value; saveState(); renderPreview(); });
 
     const renderToggles = () => {
       togglesHost.innerHTML = "";
@@ -1037,12 +1067,23 @@ function renderDomains() {
           if (k >= 0) d.groupIds.splice(k, 1); else d.groupIds.push(g.id);
           saveState();
           badge.textContent = domainSubdomains(d).length + " 個子網域";
-          renderToggles(); renderPreview();
+          renderToggles(); refreshRootGroup(); renderPreview();
         });
         togglesHost.appendChild(chip);
       });
     };
+    // 網域根的群組下拉：只列出「已套用」的群組
+    const refreshRootGroup = () => {
+      const ids = d.groupIds || [];
+      const sgs = ids.map(id => state.groups.find(x => x.id === id)).filter(Boolean);
+      const sel = ids.includes(d.rootGroupId) ? d.rootGroupId : (sgs[0] ? sgs[0].id : "");
+      rootGroup.innerHTML = sgs.length === 0
+        ? '<option value="">（未套用群組）</option>'
+        : sgs.map(g => `<option value="${g.id}" ${sel === g.id ? "selected" : ""}>${escapeHtml(g.name || "(未命名)")}</option>`).join("");
+      rootGroup.disabled = !d.includeRoot || sgs.length === 0;
+    };
     renderToggles();
+    refreshRootGroup();
 
     createTagInput(host, d.subdomains, () => { saveState(); badge.textContent = domainSubdomains(d).length + " 個子網域"; renderPreview(); }, "專屬子網域，輸入後 Enter");
 
@@ -1205,7 +1246,7 @@ function initStaticEvents() {
 
 document.getElementById("addDomainBtn").addEventListener("click", () => {
   const firstGid = state.groups[0] ? state.groups[0].id : null;
-  state.domains.push({ name: "", groupIds: firstGid ? [firstGid] : [], subdomains: [] });
+  state.domains.push({ name: "", groupIds: firstGid ? [firstGid] : [], subdomains: [], includeRoot: false, rootGroupId: firstGid || "" });
   saveState(); renderDomains(); renderPreview();
   const inputs = document.querySelectorAll("#domainList .name");
   if (inputs.length) inputs[inputs.length - 1].focus();
@@ -1276,7 +1317,9 @@ document.getElementById("importFile").addEventListener("change", (e) => {
         domains: (Array.isArray(s.domains) ? s.domains : []).map(d => ({
           name: typeof d.name === "string" ? d.name : "",
           groupIds: Array.isArray(d.groupIds) ? d.groupIds : [],
-          subdomains: arr(d.subdomains)
+          subdomains: arr(d.subdomains),
+          includeRoot: !!d.includeRoot,
+          rootGroupId: typeof d.rootGroupId === "string" ? d.rootGroupId : ""
         })),
         serverTemplate: typeof s.serverTemplate === "string" ? s.serverTemplate : "",
         includeFiles: Array.isArray(s.includeFiles) ? s.includeFiles : [],
